@@ -14,12 +14,15 @@ class Traductor_ES_EN():
         return response.json()
 
     def translate(self, text):
-        output = self.__query({
-            "inputs": text,
-        })
+        try:
+            output = self.__query({
+                "inputs": text,
+            })
 
-        # print("text:", text)
-        # print("output:", output)
+            # print("text:", text)
+            # print("output:", output)
 
-        translated_text = output[0]['generated_text']
-        return translated_text
+            translated_text = output[0]['generated_text']
+            return translated_text
+        except Exception as e:
+            raise f"Error al traducir. Por favor, intente de nuevo.\n {str(e)}"

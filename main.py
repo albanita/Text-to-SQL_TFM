@@ -26,12 +26,22 @@ def generate_sql():
     global TRADUCTOR_MODEL
 
     if query_in_spanish:
-        input_nl_query = TRADUCTOR_MODEL.translate(input_nl_query)
+        try:
+            input_nl_query = TRADUCTOR_MODEL.translate(input_nl_query)
+        except Exception as e:
+            return jsonify({
+                'sql_query': str(e),
+                'columns_list': None,
+                'values_list': None,
+                'show_modal': False
+            })
 
     sql_query = TEXT_TO_SQL_MODEL.generate_sql(input_nl_query=input_nl_query)
 
     try:
         db = DB_Connection()
+        if "SELECT name SELECT name" in sql_query:
+            sql_query = sql_query.split("SELECT name")[1]
         columns_list, values_list = db.execute_query(sql_query)
 
         return jsonify({
@@ -57,7 +67,11 @@ if __name__ == "__main__":
                                                   input_tokenizer_path="model_assets/input_tokenizer.json",
                                                   target_tokenizer_path="model_assets/target_tokenizer.json")
 
+    # text = "Display the mission_name and mission_status for all where start_date is before 1990 in the space_missions table"
+    # # text = "Display the mission_name, launch_date, and mission_status for all missions launched before 1990 in the space_missions table"
+    # sql_query = TEXT_TO_SQL_MODEL.generate_sql(input_nl_query=text)
+    # print(sql_query)
+
     TRADUCTOR_MODEL = Traductor_ES_EN()
-    TRADUCTOR_MODEL.translate(" ")
 
     app.run(debug=True)

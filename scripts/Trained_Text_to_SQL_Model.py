@@ -41,107 +41,108 @@ class Trained_Text_to_SQL_Model:
         self.__target_tokenizer = tokenizer_from_json(json.dumps(target_tokenizer_config))
 
     def __extract_encoder_decoder_architecture(self):
-        # Encoder
-        encoder_inputs = self.__model.input[0]
-        encoder_embedding = self.__model.get_layer("embedding")(encoder_inputs)
-        encoder_norm = self.__model.get_layer("layer_normalization")(encoder_embedding)
-        encoder_lstm = self.__model.get_layer("lstm")
-        encoder_outputs, state_h, state_c = encoder_lstm(encoder_norm)
+        # ----------------------------- #
+        #          ENCODER              #
+        # ----------------------------- #
+        # Define encoder inputs
+        encoder_inputs = self.__model.get_layer("input_7").input
+        encoder_embedding = self.__model.get_layer("embedding_6")(encoder_inputs)
+        encoder_norm = self.__model.get_layer("layer_normalization_6")(encoder_embedding)
 
-        self.__encoder_model = Model(encoder_inputs, [encoder_outputs, state_h, state_c])
+        # LSTM layers
+        encoder_lstm1 = self.__model.get_layer("lstm_11")
+        encoder_lstm2 = self.__model.get_layer("lstm_12")
+
+        # Decoder inputs
+        decoder_inputs = self.__model.get_layer("input_8").input
+        decoder_embedding = self.__model.get_layer("embedding_7")(decoder_inputs)
+        decoder_norm = self.__model.get_layer("layer_normalization_7")(decoder_embedding)
+
+        # Decoder LSTMs with states from the encoder
+        decoder_lstm1 = self.__model.get_layer("lstm_13")
+        decoder_lstm2 = self.__model.get_layer("lstm_14")
+
+        attention_layer = self.__model.get_layer("additive_attention_2")
+        decoder_dense = self.__model.get_layer("dense_1")
+
+        encoder_outputs1, self.__model, state_c1 = encoder_lstm1(encoder_norm)
+
+        encoder_outputs2, state_h2, state_c2 = encoder_lstm2(encoder_outputs1)  # This is the final output
+
+        # Define encoder model (ensure it returns 3 values)
+        self.__encoder_model = Model(inputs=encoder_inputs, outputs=[encoder_outputs2, state_h2, state_c2])
+
         print("✅ Encoder model successfully extracted!")
 
-        # Decoder
-        decoder_inputs = self.__model.input[1]
-        decoder_embedding = self.__model.get_layer("embedding_1")(decoder_inputs)
-        decoder_norm = self.__model.get_layer("layer_normalization_1")(decoder_embedding)
+        # ----------------------------- #
+        #          DECODER              #
+        # ----------------------------- #
+        # NEW input layers to avoid duplication errors
 
-        decoder_lstm = self.__model.get_layer("lstm_1")
-        decoder_state_input_h = Input(shape=(512,), name="decoder_input_h")
-        decoder_state_input_c = Input(shape=(512,), name="decoder_input_c")
-        decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
+        # Define decoder initial states (received from the encoder during inference)
+        decoder_state_input_h1 = Input(shape=(256,))
+        decoder_state_input_c1 = Input(shape=(256,))
+        decoder_state_input_h2 = Input(shape=(256,))
+        decoder_state_input_c2 = Input(shape=(256,))
 
-        decoder_lstm_outputs, state_h, state_c = decoder_lstm(
-            decoder_norm, initial_state=decoder_states_inputs
+        decoder_outputs1, state_h1, state_c1 = decoder_lstm1(
+            decoder_norm, initial_state=[decoder_state_input_h1, decoder_state_input_c1]
+        )
+        decoder_outputs2, state_h2, state_c2 = decoder_lstm2(
+            decoder_outputs1, initial_state=[decoder_state_input_h2, decoder_state_input_c2]
         )
 
-        encoder_outputs_input = Input(shape=(100, 512), name="encoder_outputs_input")
-        attention_layer = self.__model.get_layer("additive_attention")
-        attention_outputs = attention_layer([decoder_lstm_outputs, encoder_outputs_input])
+        # Attention mechanism (use `lstm_12` output instead of `encoder_lstm1`)
 
-        decoder_combined_context = Concatenate(axis=-1)([attention_outputs, decoder_lstm_outputs])
-        decoder_dense = self.__model.get_layer("dense")
-        decoder_outputs = decoder_dense(decoder_combined_context)
+        encoder_outputs = Input(shape=(100, 256))  # Corrected to match decoder_outputs2
+        attention_output = attention_layer([decoder_outputs2, encoder_outputs])
 
+        # Concatenation and final dense layer
+        concatenated = Concatenate()([attention_output, decoder_outputs2])
+
+        decoder_outputs = decoder_dense(concatenated)
+
+        # Decoder model
         self.__decoder_model = Model(
-            [decoder_inputs, encoder_outputs_input] + decoder_states_inputs,
-            [decoder_outputs, state_h, state_c]
+            [decoder_inputs, decoder_state_input_h1, decoder_state_input_c1, decoder_state_input_h2,
+             decoder_state_input_c2, encoder_outputs],
+            [decoder_outputs, state_h1, state_c1, state_h2, state_c2]
         )
 
         print("✅ Decoder model successfully extracted!")
 
-
-        # encoder_inputs = self.__model.input[0]  # input_7 (Encoder input)
-        # embedding_enc = self.__model.get_layer("embedding_6")(encoder_inputs)
-        # norm_enc = self.__model.get_layer("layer_normalization_6")(embedding_enc)
-        # lstm_1, state_h, state_c = self.__model.get_layer("lstm_11")(norm_enc)
-        # encoder_outputs, state_h_enc, state_c_enc = self.__model.get_layer("lstm_12")(lstm_1)
-        #
-        # # Define the encoder model
-        # self.__encoder_model = Model(encoder_inputs, [encoder_outputs, state_h_enc, state_c_enc])
-        # print("✅ Encoder model successfully extracted!")
-        #
-        # # Decoder model
-        # decoder_inputs = self.__model.input[1]  # input_8 (Decoder input)
-        # embedding_dec = self.__model.get_layer("embedding_7")(decoder_inputs)
-        # norm_dec = self.__model.get_layer("layer_normalization_7")(embedding_dec)
-        # decoder_state_input_h = Input(shape=(256,), name="decoder_state_input_h")
-        # decoder_state_input_c = Input(shape=(256,), name="decoder_state_input_c")
-        #
-        # decoder_lstm_1 = self.__model.get_layer("lstm_13")
-        # decoder_outputs, state_h_dec, state_c_dec = decoder_lstm_1(norm_dec, initial_state=[decoder_state_input_h,
-        #                                                                                     decoder_state_input_c])
-        #
-        # decoder_lstm_2 = self.__model.get_layer("lstm_14")
-        # decoder_outputs, state_h_dec, state_c_dec = decoder_lstm_2(decoder_outputs,
-        #                                                            initial_state=[state_h_dec, state_c_dec])
-        #
-        # attention = self.__model.get_layer("additive_attention_2")
-        # attention_output = attention([decoder_outputs, encoder_outputs])
-        # concat = self.__model.get_layer("concatenate_1")
-        # decoder_combined_context = concat([attention_output, decoder_outputs])
-        #
-        # decoder_dense = self.__model.get_layer("dense_1")
-        # decoder_outputs = decoder_dense(decoder_combined_context)
-        #
-        # # Define the decoder model
-        # self.__decoder_model = Model(
-        #     [decoder_inputs, encoder_outputs, decoder_state_input_h, decoder_state_input_c],
-        #     [decoder_outputs, state_h_dec, state_c_dec]
-        # )
-        # print("✅ Decoder model successfully extracted!")
-
     def __decode_sequence(self, input_seq, max_target_length=100):
-        encoder_outputs, state_h, state_c = self.__encoder_model.predict(input_seq)
+        """Generate SQL query from a natural language input."""
+        # Get encoder outputs and states
+        encoder_outputs, state_h1, state_c1 = self.__encoder_model.predict(input_seq)
 
-        start_token = self.__target_tokenizer.word_index.get('<start>', 1)
-        end_token = self.__target_tokenizer.word_index.get('<end>', 2)
+        # Start token ID
+        start_token = self.__target_tokenizer.word_index['<start>']
+        end_token = self.__target_tokenizer.word_index['<end>']
 
+        # Initial decoder input (start token)
         target_seq = np.array([[start_token]])
+
+        # Initialize decoder states (use both LSTM layers' states)
+        state_h2, state_c2 = state_h1, state_c1  # Assuming the second layer starts with same states
+
         decoded_sentence = []
 
         for _ in range(max_target_length):
-            output_tokens, state_h, state_c = self.__decoder_model.predict(
-                [target_seq, encoder_outputs, state_h, state_c]
-            )
+            # Predict next token with all 6 required inputs
+            decoder_inputs = [target_seq, state_h1, state_c1, state_h2, state_c2, encoder_outputs]
+            predictions, state_h1, state_c1, state_h2, state_c2 = self.__decoder_model.predict(decoder_inputs)
 
-            sampled_token_index = np.argmax(output_tokens[0, -1, :])
+            # Get most probable word index
+            sampled_token_index = np.argmax(predictions[0, -1, :])
             sampled_word = self.__target_tokenizer.index_word.get(sampled_token_index, '<unk>')
 
             if sampled_word == '<end>':
                 break
 
             decoded_sentence.append(sampled_word)
+
+            # Update target sequence with the new predicted token
             target_seq = np.array([[sampled_token_index]])
 
         return ' '.join(decoded_sentence)
